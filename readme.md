@@ -1,6 +1,6 @@
 ## ShotGrid Render Cleanup Script
 
-A Nuke-hosted tool that scans your local render directories and deletes EXR frame sequences according to ShotGrid version status rules. It provides a simple Qt dialog for dry-runs, progress feedback, and one-click deletion.
+A Nuke-hosted tool that scans your local render directories and clears out EXR frame sequences according to ShotGrid version status rules. It provides a simple Qt dialog for dry-runs, progress feedback, and one-click deletion.
 
 ---
 
