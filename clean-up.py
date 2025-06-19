@@ -456,8 +456,8 @@ class RenderCleanup(object):
         """Get just the immediate directory containing the EXR sequence
 
         Example:
-        Input: C:/BAKED/Film/HAL/SUITE/2_WORK/1_SEQUENCES/042/HAL_042_1020/COMP/publish/renders/HAL_042_1020_comp_v001/4448x3096/HAL_042_1020_comp_v001.%04d.exr
-        Output: C:/BAKED/Film/HAL/SUITE/2_WORK/1_SEQUENCES/042/HAL_042_1020/COMP/publish/renders/HAL_042_1020_comp_v001/4448x3096
+        Input: C:/PROJECTS/Film/HAL/SUITE/2_WORK/1_SEQUENCES/042/HAL_042_1020/COMP/publish/renders/HAL_042_1020_comp_v001/4448x3096/HAL_042_1020_comp_v001.%04d.exr
+        Output: C:/PROJECTS/Film/HAL/SUITE/2_WORK/1_SEQUENCES/042/HAL_042_1020/COMP/publish/renders/HAL_042_1020_comp_v001/4448x3096
         """
         # Simply return the directory containing the frame sequence
         try:
