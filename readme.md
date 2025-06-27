@@ -4,21 +4,6 @@ A Nuke-hosted tool that scans your local render directories and clears out EXR f
 
 ---
 
-### Table of Contents
-
-1. [Overview](#overview)  
-2. [Prerequisites](#prerequisites)  
-3. [Installation](#installation)  
-4. [Usage](#usage)  
-   - 4.1 [Launching in Nuke](#launching-in-nuke)  
-   - 4.2 [Dialog Workflow](#dialog-workflow)  
-5. [Cleanup Rules](#cleanup-rules)  
-6. [Logging](#logging)  
-7. [Error Handling](#error-handling)  
-8. [Extending or Customizing](#extending-or-customizing)  
-
----
-
 ## Overview
 
 When working on VFX projects, large EXR renders can quickly accumulate on local disks. This script:
