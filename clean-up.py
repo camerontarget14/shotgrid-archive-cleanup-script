@@ -1,8 +1,10 @@
-# ShotGrid Render Cleanup Script
-# This script identifies and deletes EXR render files based on specific rules:
-# 1. All EXR renders linked to versions with status "na"
-# 2. All older EXR renders linked to versions with status "bkdn" on shots with multiple "bkdn" versions, except the newest version
-# 3. All older EXR renders linked to versions with status "note" on shots with more than 2 "note" versions, except the 2 latest versions
+"""
+ShotGrid Render Cleanup Script
+This script identifies and deletes EXR render files based on specific rules:
+1. All EXR renders linked to versions with status "na"
+2. All older EXR renders linked to versions with status "bkdn" on shots with multiple "bkdn" versions, except the newest version
+3. All older EXR renders linked to versions with status "note" on shots with more than 2 "note" versions, except the 2 latest versions
+"""
 
 import os
 import sys
@@ -10,23 +12,9 @@ import shutil
 import traceback
 from collections import defaultdict
 import logging
-
-# Get the current Nuke instance
 import nuke
+from PySide2 import QtWidgets, QtCore, QtGui
 
-# Import Qt modules at the top level
-try:
-    from PySide2 import QtWidgets, QtCore, QtGui
-except ImportError:
-    try:
-        from PySide import QtGui, QtCore
-        QtWidgets = QtGui
-    except ImportError:
-        # Final fallback to sgtk's Qt imports
-        from sgtk.platform.qt import QtGui, QtCore
-        QtWidgets = QtGui
-
-# Initialize empty variables to avoid reference errors
 sg = None
 engine = None
 context = None
@@ -36,9 +24,7 @@ def setup_logger():
     log = logging.getLogger("sg_render_cleanup")
     log.setLevel(logging.INFO)
 
-    # Check if the logger already has handlers to avoid duplicates
     if not log.handlers:
-        # Create console handler
         handler = logging.StreamHandler()
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
@@ -50,7 +36,6 @@ log = setup_logger()
 
 class RenderCleanup(object):
     def __init__(self):
-        # Initialize UI components as None
         self.dialog = None
         self.results_text = None
         self.dry_run_checkbox = None
@@ -59,14 +44,11 @@ class RenderCleanup(object):
         self.scan_button = None
         self.delete_button = None
 
-        # Initialize data variables
         self.deleted_frames = []
         self.frames_to_delete = []
         self.dry_run = True
 
-        # Import ShotGrid API with proper error handling
         try:
-            # Try to get the current ShotGrid engine and context
             import sgtk
             self.engine = sgtk.platform.current_engine()
             if not self.engine:
@@ -76,16 +58,13 @@ class RenderCleanup(object):
             if not self.context:
                 raise ImportError("No ShotGrid context found. Are you in a valid ShotGrid context?")
 
-            # Get the ShotGrid instance
             self.sg = self.context.sgtk.shotgun
             if not self.sg:
                 raise ImportError("Could not connect to ShotGrid")
 
-            # Log successful initialization
             self.log = log
             self.log.info(f"Successfully initialized ShotGrid connection")
 
-            # Define excluded pipeline steps
             self.excluded_pipeline_steps = ["Roto", "Paint", "Prep", "Ingest", "v000"]
 
         except ImportError as e:
@@ -97,14 +76,12 @@ class RenderCleanup(object):
     def show_dialog(self):
         """Display the cleanup dialog with proper error handling"""
         try:
-            # Create dialog if it doesn't exist
             if not self.dialog:
                 self.dialog = QtWidgets.QDialog()
                 self.dialog.setWindowTitle("ShotGrid Render Cleanup")
                 self.dialog.setMinimumWidth(500)
                 self.dialog.setMinimumHeight(400)
 
-                # Use a QVBoxLayout for the main layout
                 layout = QtWidgets.QVBoxLayout()
                 self.dialog.setLayout(layout)
 
@@ -133,17 +110,14 @@ class RenderCleanup(object):
                 self.progress_bar.setVisible(False)
                 layout.addWidget(self.progress_bar)
 
-                # Status label
                 self.status_label = QtWidgets.QLabel("")
                 self.status_label.setVisible(False)
                 layout.addWidget(self.status_label)
 
-                # Results text area
                 self.results_text = QtWidgets.QTextEdit()
                 self.results_text.setReadOnly(True)
                 layout.addWidget(self.results_text)
 
-                # Buttons
                 button_layout = QtWidgets.QHBoxLayout()
 
                 self.scan_button = QtWidgets.QPushButton("Scan")
@@ -160,10 +134,8 @@ class RenderCleanup(object):
 
                 layout.addLayout(button_layout)
 
-            # Log before showing dialog
             self.log.info("About to show dialog")
 
-            # Show the dialog and make it stay open with exec_()
             self.dialog.exec_()
 
         except Exception as e:
@@ -174,58 +146,45 @@ class RenderCleanup(object):
     def run_scan(self):
         """Run the scan to identify files to delete"""
         try:
-            # Disable scan button during execution
             self.scan_button.setEnabled(False)
 
-            # Show progress bar and reset it
             self.progress_bar.setValue(0)
             self.progress_bar.setVisible(True)
             self.status_label.setText("Starting scan...")
             self.status_label.setVisible(True)
 
-            # Process UI events to update display
             QtWidgets.QApplication.processEvents()
 
             self.dry_run = self.dry_run_checkbox.isChecked()
 
-            # Clear the results text
             if self.results_text:
                 self.results_text.clear()
 
             self.log_message("Starting scan...")
 
-            # Get current project
             project = self.context.project
             if not project:
                 self.log_message("Error: No project found in context")
                 return
 
-            # Update progress
             self.update_progress(10, "Fetching versions...")
 
-            # Get versions from this project
             self.log_message(f"Fetching versions for project: {project['name']}")
 
-            # Step 1: Get all versions that aren't in excluded pipeline steps
             all_versions = self.get_versions_for_cleanup(project)
             self.log_message(f"Found {len(all_versions)} versions to analyze")
 
-            # Update progress
             self.update_progress(40, "Grouping versions by shot...")
 
-            # Step 2: Group versions by shot
             task_versions = self.group_versions_by_shot(all_versions)
 
-            # Update progress
             self.update_progress(60, "Applying cleanup rules...")
 
-            # Step 3: Apply cleanup rules
             self.frames_to_delete = self.apply_cleanup_rules(task_versions)
 
-            # Update progress
             self.update_progress(90, "Finalizing results...")
 
-            # Calculate total size to be deleted (approximately)
+            # Calculate total size to be deleted (approx)
             total_size_bytes = 0
             for frame_path in self.frames_to_delete:
                 if os.path.exists(frame_path):
@@ -237,7 +196,6 @@ class RenderCleanup(object):
                                 if os.path.exists(fp):
                                     total_size_bytes += os.path.getsize(fp)
                     else:
-                        # For files, get the direct size
                         total_size_bytes += os.path.getsize(frame_path)
 
             # Convert bytes to more readable format
@@ -260,7 +218,7 @@ class RenderCleanup(object):
             else:
                 self.log_message("No paths found to delete.")
 
-            # Now display the summary
+            # display summary
             self.log_message("\n" + "="*50)
             self.log_message(f"SCAN SUMMARY:")
             self.log_message(f"Total deletable paths: {len(self.frames_to_delete)}")
@@ -271,10 +229,8 @@ class RenderCleanup(object):
                 self.log_message("\nDRY RUN COMPLETE - No files were deleted")
                 self.log_message("Uncheck 'Dry run' and click 'Delete Files' to perform actual deletion")
 
-            # Scan complete
             self.update_progress(100, "Scan complete")
 
-            # Re-enable scan button
             self.scan_button.setEnabled(True)
 
         except Exception as e:
@@ -283,7 +239,6 @@ class RenderCleanup(object):
             self.log_message(traceback.format_exc())
             nuke.message(error_msg)
 
-            # Re-enable scan button and hide progress
             self.scan_button.setEnabled(True)
             self.status_label.setText("Error during scan")
             self.update_progress(100, "Error")
@@ -297,11 +252,9 @@ class RenderCleanup(object):
             if status_text and hasattr(self, 'status_label') and self.status_label:
                 self.status_label.setText(status_text)
 
-            # Process UI events to update the display
             QtWidgets.QApplication.processEvents()
 
         except Exception as e:
-            # Just log the error but don't interrupt the process
             self.log.error(f"Error updating progress: {str(e)}")
 
     def delete_files(self):
@@ -315,7 +268,6 @@ class RenderCleanup(object):
                 self.log_message("Dry run is enabled. Uncheck 'Dry run' to delete files.")
                 return
 
-            # Disable delete button and show progress
             self.delete_button.setEnabled(False)
             self.progress_bar.setValue(0)
             self.progress_bar.setVisible(True)
@@ -327,12 +279,10 @@ class RenderCleanup(object):
 
             total_files = len(self.frames_to_delete)
             for i, frame_path in enumerate(self.frames_to_delete):
-                # Update progress periodically
                 progress_value = int((i / total_files) * 100)
                 self.update_progress(progress_value, f"Deleting file {i+1} of {total_files}")
 
                 if os.path.exists(frame_path):
-                    # Check if it's a directory or a file
                     if os.path.isdir(frame_path):
                         self.log_message(f"Deleting directory: {frame_path}")
                         shutil.rmtree(frame_path)
@@ -344,12 +294,10 @@ class RenderCleanup(object):
                 else:
                     self.log_message(f"Path not found: {frame_path}")
 
-            # Update progress to 100% when complete
             self.update_progress(100, "Deletion complete")
 
             self.log_message(f"Deletion complete. Deleted {len(self.deleted_frames)} out of {len(self.frames_to_delete)} frame sequences.")
 
-            # Re-enable the delete button
             self.delete_button.setEnabled(True)
 
         except Exception as e:
@@ -357,8 +305,7 @@ class RenderCleanup(object):
             self.log_message(error_msg)
             self.log_message(traceback.format_exc())
             nuke.message(error_msg)
-
-            # Re-enable delete button and update status
+            
             self.delete_button.setEnabled(True)
             self.status_label.setText("Error during deletion")
             self.update_progress(100, "Error")
@@ -366,8 +313,6 @@ class RenderCleanup(object):
     def get_versions_for_cleanup(self, project):
         """Get all versions that aren't in excluded pipeline steps"""
         try:
-            # First get all versions with EXR paths in this project
-            # Don't filter by pipeline step yet as that's causing the error
             filters = [
                 ['project', 'is', project],
                 ['sg_path_to_frames', 'is_not', None]  # Ensure path_to_frames exists
@@ -378,7 +323,7 @@ class RenderCleanup(object):
                 'sg_status_list',
                 'entity',
                 'sg_task',
-                'sg_task.Task.step',  # Get the step entity
+                'sg_task.Task.step',
                 'sg_path_to_frames',
                 'created_at'
             ]
@@ -386,37 +331,29 @@ class RenderCleanup(object):
             versions = self.sg.find('Version', filters, fields, order=[{'field_name': 'created_at', 'direction': 'asc'}])
             self.log_message(f"Retrieved {len(versions)} total versions from ShotGrid")
 
-            # Only keep versions with path_to_frames that ends with .exr
-            # and also filter out versions with excluded pipeline steps
             filtered_versions = []
             excluded_count = 0
             non_exr_count = 0
 
             for v in versions:
-                # Log verbose details about each version for debugging
                 version_code = v.get('code', 'Unknown')
                 path = v.get('sg_path_to_frames', 'No path')
 
-                # Check if it's an EXR file
                 if not path or not path.lower().endswith('.exr'):
                     non_exr_count += 1
                     continue
 
-                # Check if this version has a task with a step
                 step_info = "No step info"
                 if v.get('sg_task.Task.step'):
                     step = v['sg_task.Task.step']
                     step_name = step.get('name', 'Unknown')
                     step_info = f"Step: {step_name}"
 
-                    # If the step name is in the excluded list, skip this version
                     if step_name in self.excluded_pipeline_steps:
                         self.log_message(f"Excluding version {version_code} due to pipeline step: {step_name}")
                         excluded_count += 1
                         continue
 
-                # Special case: check if path contains any of the excluded steps
-                # This is a fallback for cases where the step info might be missing
                 path_contains_excluded = False
                 for excluded_step in self.excluded_pipeline_steps:
                     if excluded_step.upper() in path.upper():
@@ -424,13 +361,11 @@ class RenderCleanup(object):
                         path_contains_excluded = True
                         break
 
-                # Keep this version if it passed all filters
                 if not path_contains_excluded:
                     filtered_versions.append(v)
                 else:
                     excluded_count += 1
 
-            # Log filter statistics
             self.log_message(f"Filter stats: {len(filtered_versions)} kept, {excluded_count} excluded by step, {non_exr_count} non-EXR")
 
             return filtered_versions
@@ -446,19 +381,12 @@ class RenderCleanup(object):
 
         for version in versions:
             if version.get('entity') and version.get('sg_task'):
-                # Create a unique key combining entity ID and task ID
                 key = f"{version['entity']['id']}_{version['sg_task']['id']}"
                 task_versions[key].append(version)
 
         return task_versions
 
     def get_sequence_directory(self, frame_path):
-        """Get just the immediate directory containing the EXR sequence
-
-        Example:
-        Input: C:/PROJECTS/Film/HAL/SUITE/2_WORK/1_SEQUENCES/042/HAL_042_1020/COMP/publish/renders/HAL_042_1020_comp_v001/4448x3096/HAL_042_1020_comp_v001.%04d.exr
-        Output: C:/PROJECTS/Film/HAL/SUITE/2_WORK/1_SEQUENCES/042/HAL_042_1020/COMP/publish/renders/HAL_042_1020_comp_v001/4448x3096
-        """
         # Simply return the directory containing the frame sequence
         try:
             return os.path.dirname(frame_path)
@@ -467,17 +395,13 @@ class RenderCleanup(object):
             return frame_path
 
     def apply_cleanup_rules(self, task_versions):
-        """Apply the cleanup rules to identify frames to delete"""
         frames_to_delete = []
         missing_paths = 0
 
         try:
-            # Process each shot+task combination
             for task_key, versions in task_versions.items():
-                # Extract shot_id and task_id from the key
                 shot_id, task_id = task_key.split('_')
 
-                # Get shot and task names
                 shot_name = versions[0]['entity']['name'] if versions and versions[0].get('entity') else f"ID: {shot_id}"
                 task_name = versions[0]['sg_task']['name'] if versions and versions[0].get('sg_task') else f"ID: {task_id}"
                 self.log_message(f"\nProcessing Shot: {shot_name}, Task: {task_name}")
@@ -519,20 +443,17 @@ class RenderCleanup(object):
                 note_versions = [v for v in versions if v['sg_status_list'] == 'note']
                 if len(note_versions) > 2:
                     # Keep only the 2 newest note versions (last 2 in the list since sorted by created_at)
-                    versions_to_delete = note_versions[:-2]  # All except the last two
+                    versions_to_delete = note_versions[:-2]
                     for v in versions_to_delete:
                         if v.get('sg_path_to_frames'):
-                            # Get the directory containing the frame sequence
                             seq_dir = self.get_sequence_directory(v['sg_path_to_frames'])
 
-                            # Only add to delete list if the path exists
                             if os.path.exists(seq_dir):
                                 frames_to_delete.append(seq_dir)
                                 self.log_message(f"Rule 3 (older note): {v['code']} - {seq_dir}")
                             else:
                                 missing_paths += 1
-
-            # Log how many paths were skipped because they don't exist
+                                
             if missing_paths > 0:
                 self.log_message(f"\nSkipped {missing_paths} paths that no longer exist on the file system")
 
@@ -553,7 +474,6 @@ class RenderCleanup(object):
             if hasattr(self, 'results_text') and self.results_text:
                 self.results_text.append(message)
 
-                # Scroll to bottom
                 cursor = self.results_text.textCursor()
                 cursor.movePosition(QtCore.QTextCursor.End)
                 self.results_text.setTextCursor(cursor)
@@ -569,13 +489,10 @@ class RenderCleanup(object):
 def run_in_nuke():
     """Run the cleanup tool from Nuke with robust error handling"""
     try:
-        # First log that we're starting
         log.info("Starting ShotGrid Render Cleanup tool")
 
-        # Create the cleanup instance
         cleanup = RenderCleanup()
 
-        # Log the current context
         try:
             project = cleanup.context.project
             cleanup.log.info(f"Running in project context: {project['name']} (ID: {project['id']})")
@@ -593,6 +510,5 @@ def run_in_nuke():
         log.error(error_msg)
         nuke.message(error_msg)
 
-# Run the script
 if __name__ == "__main__":
     run_in_nuke()
