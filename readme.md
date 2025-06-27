@@ -21,61 +21,42 @@ A Nuke-hosted tool that scans your local render directories and clears out EXR f
 
 ## Overview
 
-When working on VFX projects, intermediate EXR renders can quickly accumulate on local disks. This script:
+When working on VFX projects, large EXR renders can quickly accumulate on local disks. This script:
 
 - Connects to your current ShotGrid project context.  
 - Scans all **.exr** sequences for versions in ShotGrid.  
 - Applies three deletion rules based on version status in ShotGrid.  
 - Presents results in a Qt dialog for review.  
-- Deletes selected frame-sequence folders or files.
+- Deletes selected image-sequence folders and files.
 
 ---
 
 ## Prerequisites
 
-- **Nuke** (with Python API enabled)  
+- **Nuke** (with Python API)  
 - **ShotGrid Toolkit** (to obtain `sg`, `engine`, and `context`; must be running from within a Toolkit hook or engine)  
 - Python modules:  
-  - `PySide2` (preferred) or `PySide` or `sgtk.platform.qt`  
+  - `PySide2`
   - Standard library: `os`, `sys`, `shutil`, `logging`, `collections`, `traceback`
 
-Ensure your Nuke launcher has access to the same Python environment where ShotGrid Toolkit is installed.
+Make sure your Nuke launcher has access to the same Python environment where ShotGrid Toolkit is installed.
 
 ---
 
-## Installation
+## Optional Installation
 
-1. **Copy** the script file (e.g. `sg_render_cleanup.py`) into your Nuke plugin path or Toolkit hook folder.  
-2. **Import** or `execfile()` it in your menu initialization, e.g.:
-
-   ```python
-   import sg_render_cleanup
-   ```
-
-3. **Add** a menu item in your `menu.py`:
-
-   ```python
-   import nuke
-   from sg_render_cleanup import run_in_nuke
-
-   nuke.menu("Nuke").addCommand("ShotGrid/Render Cleanup", run_in_nuke)
-   ```
-
-4. Alternative: **Use** Cragl smartScripter tool to keep track of python script in Nuke.
+1. Copy the script file (`cleanup.py`) into your Nuke plugin path or Toolkit hook folder.  
+2. Add a menu item in your `menu.py`
+3. Alternative: **Use** Cragl smartScripter tool to keep track of python script in Nuke.
 
 ---
 
 ## Usage
 
-### Launching in Nuke
+### Running from Script Editor
 
-Once installed, select **ShotGrid ▶ Render Cleanup** from the main menu. The tool will:
+Copy and paste the cleanup.py contents into the nuke script editor while in the appropriate SG toolkit context. Run from there.
 
-1. Initialize a ShotGrid connection.  
-2. Retrieve your current project context.  
-3. Display the cleanup dialog.
-
-If initialization fails, a Nuke message box will report the error.
 
 ### Dialog Workflow
 
@@ -96,16 +77,16 @@ If initialization fails, a Nuke message box will report the error.
 
 ---
 
-## Cleanup Rules
+## Currently Baked-In Cleanup Rules
 
 1. **Rule 1 – “na” Status**  
    Delete **all** EXR renders for versions whose `sg_status_list == "na"`.
 
 2. **Rule 2 – “bkdn” Status**  
-   On any shot/task with **multiple** `"bkdn"` versions, delete all **older** frame sequences, preserving only the **newest** `"bkdn"` version.
+   On any shot/task with **multiple** `"bkdn"` (Baked Note) versions, delete all **older** frame sequences, preserving only the **newest** `"bkdn"` version.
 
 3. **Rule 3 – “note” Status**  
-   On any shot/task with **more than 2** `"note"` versions, delete all but the **two newest** `"note"` versions.
+   On any shot/task with **more than 2** `"note"` (client note) versions, delete all but the **two newest** `"note"` versions.
 
 > Versions belonging to excluded pipeline steps (`Roto`, `Paint`, `Prep`, `Ingest`, `v000`) are filtered out before applying rules.
 
@@ -134,10 +115,8 @@ If initialization fails, a Nuke message box will report the error.
 ## Extending or Customizing
 
 - **Add New Rules**  
-  Extend `apply_cleanup_rules()`—remember to update the UI info text.  
+  Extend `apply_cleanup_rules()`— helpful to update the UI info text as well.  
 - **Change Excluded Steps**  
   Modify `self.excluded_pipeline_steps` in the `RenderCleanup` initializer.  
 - **Alternate File Types**  
   Adjust the `.exr` filter in `get_versions_for_cleanup()`.  
-- **Different Qt Binding**  
-  Swap out PySide2 for PyQt5 or another Qt binding—ensure imports at top are updated.
