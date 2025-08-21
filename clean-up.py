@@ -2,8 +2,8 @@
 ShotGrid Render Cleanup Script
 This script identifies and deletes EXR render files based on specific rules:
 1. All EXR renders linked to versions with status "na"
-2. All older EXR renders linked to versions with status "bkdn" on shots with multiple "bkdn" versions, except the newest version
-3. All older EXR renders linked to versions with status "note" on shots with more than 2 "note" versions, except the 2 latest versions
+2. All older EXR renders linked to versions with status "intn" (internal note) on shots with multiple "intn" versions, except the newest version
+3. All older EXR renders linked to versions with status "note" (client note) on shots with more than 2 "note" versions, except the 2 latest versions
 """
 
 import os
@@ -13,7 +13,28 @@ import traceback
 from collections import defaultdict
 import logging
 import nuke
-from PySide2 import QtWidgets, QtCore, QtGui
+
+# ---- Qt compat shim (PySide6 first, then PySide2, then PySide) ----
+try:
+    from PySide6 import QtWidgets, QtCore, QtGui
+    QT_BINDING = "PySide6"
+except ImportError:
+    try:
+        from PySide2 import QtWidgets, QtCore, QtGui
+        QT_BINDING = "PySide2"
+    except ImportError:
+        from PySide import QtGui, QtCore  # legacy
+        QtWidgets = QtGui
+        QT_BINDING = "PySide"
+
+def exec_dialog(dlg):
+    """Call the correct exec() for the current Qt binding."""
+    return dlg.exec() if hasattr(dlg, "exec") else dlg.exec_()
+
+def textcursor_end():
+    """Return the correct enum for 'end of document'."""
+    # PySide6/PySide2: QTextCursor is in QtGui
+    return QtGui.QTextCursor.End if hasattr(QtGui, "QTextCursor") else QtCore.QTextCursor.End
 
 sg = None
 engine = None
@@ -90,7 +111,7 @@ class RenderCleanup(object):
                     "This tool will identify and delete EXR render files based on the following rules:"
                     "<ul>"
                     "<li>All EXR renders linked to versions with status 'na'</li>"
-                    "<li>All older EXR renders linked to versions with status 'bkdn' on shots with multiple 'bkdn' versions, except the newest version</li>"
+                    "<li>All older EXR renders linked to versions with status 'intn' on shots with multiple 'intn' versions, except the newest version</li>"
                     "<li>All older EXR renders linked to versions with status 'note' on shots with more than 2 'note' versions, except the 2 latest versions</li>"
                     "</ul>"
                     "This will only apply to internal artist renders (excluding 'Paint, 'Roto', 'Prep', 'Ingest', and 'v000' pipeline steps)."
@@ -305,7 +326,7 @@ class RenderCleanup(object):
             self.log_message(error_msg)
             self.log_message(traceback.format_exc())
             nuke.message(error_msg)
-            
+
             self.delete_button.setEnabled(True)
             self.status_label.setText("Error during deletion")
             self.update_progress(100, "Error")
@@ -420,12 +441,12 @@ class RenderCleanup(object):
                         else:
                             missing_paths += 1
 
-                # Rule 2: Delete all older EXR renders linked to versions with status "bkdn" on shots with more than 1 "bkdn" version,
-                # except the newest "bkdn" version
-                bkdn_versions = [v for v in versions if v['sg_status_list'] == 'bkdn']
-                if len(bkdn_versions) > 1:
-                    # Keep only the newest bkdn version (last in the list since sorted by created_at)
-                    versions_to_delete = bkdn_versions[:-1]  # All except the last one
+                # Rule 2: Delete all older EXR renders linked to versions with status "intn" on shots with more than 1 "intn" version,
+                # except the newest "intn" version
+                intn_versions = [v for v in versions if v['sg_status_list'] == 'intn']
+                if len(intn_versions) > 1:
+                    # Keep only the newest intn version (last in the list since sorted by created_at)
+                    versions_to_delete = intn_versions[:-1]  # All except the last one
                     for v in versions_to_delete:
                         if v.get('sg_path_to_frames'):
                             # Get the directory containing the frame sequence
@@ -434,7 +455,7 @@ class RenderCleanup(object):
                             # Only add to delete list if the path exists
                             if os.path.exists(seq_dir):
                                 frames_to_delete.append(seq_dir)
-                                self.log_message(f"Rule 2 (older bkdn): {v['code']} - {seq_dir}")
+                                self.log_message(f"Rule 2 (older intn): {v['code']} - {seq_dir}")
                             else:
                                 missing_paths += 1
 
@@ -453,7 +474,7 @@ class RenderCleanup(object):
                                 self.log_message(f"Rule 3 (older note): {v['code']} - {seq_dir}")
                             else:
                                 missing_paths += 1
-                                
+
             if missing_paths > 0:
                 self.log_message(f"\nSkipped {missing_paths} paths that no longer exist on the file system")
 
