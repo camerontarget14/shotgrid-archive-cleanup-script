@@ -23,7 +23,7 @@ When working on VFX projects, large EXR renders can quickly accumulate on local 
 - **Nuke** (with Python API)
 - **ShotGrid Toolkit** (to obtain `sg`, `engine`, and `context`; must be running from within a Toolkit hook or engine)
 - Python modules:
-  - `PySide2`
+  - `PySide`
   - Standard library: `os`, `sys`, `shutil`, `logging`, `collections`, `traceback`
 
 Make sure your Nuke launcher has access to the same Python environment where ShotGrid Toolkit is installed.
