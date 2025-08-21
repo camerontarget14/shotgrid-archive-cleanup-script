@@ -69,8 +69,8 @@ Copy and paste the cleanup.py contents into the nuke script editor while in the 
 1. **Rule 1 – “na” Status**
    Delete **all** EXR renders for versions whose `sg_status_list == "na"`.
 
-2. **Rule 2 – “bkdn” Status**
-   On any shot/task with **multiple** `"bkdn"` (Baked Note) versions, delete all **older** frame sequences, preserving only the **newest** `"bkdn"` version.
+2. **Rule 2 – “intn” Status**
+   On any shot/task with **multiple** `"intn"` (internal note) versions, delete all **older** frame sequences, preserving only the **newest** `"intn"` version.
 
 3. **Rule 3 – “note” Status**
    On any shot/task with **more than 2** `"note"` (client note) versions, delete all but the **two newest** `"note"` versions.
