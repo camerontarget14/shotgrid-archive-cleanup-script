@@ -1,12 +1,12 @@
 ## Full Documentation
 
-#### **ShotGrid Render Cleanup Script**
+## **ShotGrid Render Cleanup Script**
 
 A Nuke tool that finds and moves EXR render folders based on ShotGrid version status rules. It gives you a Qt dialog for scanning, previewing results, and moving folders to an archive destination.
 
 
 
-#### **Overview**
+## **Overview**
 
 ![screenshot](./screenshot.png)
 
@@ -20,7 +20,7 @@ When working on VFX projects, large EXR renders can quickly build up. This scrip
 
 
 
-#### **Prerequisites**
+## **Prerequisites**
 
 - **Nuke** (with Python API)
 - **ShotGrid Toolkit** (to obtain `sg`, `engine`, and `context`; must be running from within a Toolkit hook or engine)
@@ -32,7 +32,7 @@ Make sure your Nuke launcher has access to the same Python environment where Sho
 
 
 
-#### **Installation**
+## **Installation**
 
 1. Copy the script file (`clean-up.py`) into your Nuke plugin path or Toolkit hook folder.
 2. Add a menu item in your `menu.py`
@@ -40,11 +40,11 @@ Make sure your Nuke launcher has access to the same Python environment where Sho
 
 
 
-#### **Running from Script Editor**
+## **Running from Script Editor**
 
 Copy and paste the `clean-up.py` contents into the Nuke script editor while in the appropriate SG toolkit context. Run from there.
 
-#### **Dialog Workflow**
+## **Dialog Workflow**
 
 1. **Info Panel**
    - Summarizes the three cleanup rules and pipeline step exclusions.
@@ -64,7 +64,7 @@ Copy and paste the `clean-up.py` contents into the Nuke script editor while in t
 
 
 
-#### **Cleanup Rules**
+## **Cleanup Rules**
 
 1. **Rule 1 – "na" Status**
    Move **all** EXR renders for versions whose `sg_status_list == "na"`.
@@ -79,7 +79,7 @@ Copy and paste the `clean-up.py` contents into the Nuke script editor while in t
 
 
 
-#### **File Operations**
+## **File Operations**
 
 - **Archive Structure**: All moved folders are placed in a flat structure under your chosen destination directory.
 - **Conflict Resolution**: If a folder name already exists in the destination, it will be renamed with a numeric suffix (_1, _2, etc.).
@@ -88,7 +88,7 @@ Copy and paste the `clean-up.py` contents into the Nuke script editor while in t
 
 
 
-#### **Logging**
+## **Logging**
 
 - All operations are reported at `INFO` level.
 - Filter statistics (kept vs. excluded vs. non-EXR) are displayed after version retrieval.
@@ -98,7 +98,7 @@ Copy and paste the `clean-up.py` contents into the Nuke script editor while in t
 
 
 
-#### **Error Handling**
+## **Error Handling**
 
 - **Missing Toolkit / Context**
   Prompts Nuke message: "No ShotGrid engine found…"
@@ -111,7 +111,7 @@ Copy and paste the `clean-up.py` contents into the Nuke script editor while in t
 
 
 
-#### **Extending or Customizing**
+## **Extending or Customizing**
 
 - **Add New Rules**
   Extend `apply_cleanup_rules()` method and update the UI info text.
@@ -122,7 +122,7 @@ Copy and paste the `clean-up.py` contents into the Nuke script editor while in t
 - **Different Archive Structure**
   Modify the `move_files()` method to organize moved folders differently.
 
-#### Full List of API Functions:
+## Full List of API Functions:
 
 #### Nuke API
 - `import nuke`

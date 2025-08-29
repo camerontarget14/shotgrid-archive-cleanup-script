@@ -18,7 +18,7 @@ from collections import defaultdict
 import logging
 import nuke
 
-# ---- Qt compat shim (PySide6 first, then PySide2, then PySide) ----
+# ---- Qt compat shim (PySide6 first, then PySide2, then PySide) ---
 try:
     from PySide6 import QtWidgets, QtCore, QtGui
     QT_BINDING = "PySide6"
