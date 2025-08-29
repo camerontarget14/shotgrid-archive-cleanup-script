@@ -1,9 +1,13 @@
 """
 ShotGrid Render Cleanup Script
-This script identifies and deletes EXR render files based on specific rules:
+This script identifies EXR render folders to move based on specific rules:
 1. All EXR renders linked to versions with status "na"
-2. All older EXR renders linked to versions with status "intn" (internal note) on shots with multiple "intn" versions, except the newest version
+2. All older EXR renders linked to versions with status "innote" (internal note) on shots with multiple "innote" versions, except the newest version
 3. All older EXR renders linked to versions with status "note" (client note) on shots with more than 2 "note" versions, except the 2 latest versions
+
+Workflow:
+- Click "Scan" to preview all eligible EXR sequence directories in the "Preview:" box.
+- Click "Move Files" to pick a destination and move those folders into a single flat list under that destination.
 """
 
 import os
@@ -27,30 +31,24 @@ except ImportError:
         QtWidgets = QtGui
         QT_BINDING = "PySide"
 
-def exec_dialog(dlg):
-    """Call the correct exec() for the current Qt binding."""
-    return dlg.exec() if hasattr(dlg, "exec") else dlg.exec_()
-
-def textcursor_end():
-    """Return the correct enum for 'end of document'."""
-    # PySide6/PySide2: QTextCursor is in QtGui
-    return QtGui.QTextCursor.End if hasattr(QtGui, "QTextCursor") else QtCore.QTextCursor.End
+# QTextCursor compat
+try:
+    QTextCursor = QtGui.QTextCursor
+except Exception:
+    QTextCursor = QtCore.QTextCursor
 
 sg = None
 engine = None
 context = None
 
 def setup_logger():
-    """Set up a basic logger"""
     log = logging.getLogger("sg_render_cleanup")
     log.setLevel(logging.INFO)
-
     if not log.handlers:
         handler = logging.StreamHandler()
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
         log.addHandler(handler)
-
     return log
 
 log = setup_logger()
@@ -59,15 +57,13 @@ class RenderCleanup(object):
     def __init__(self):
         self.dialog = None
         self.results_text = None
-        self.dry_run_checkbox = None
         self.progress_bar = None
         self.status_label = None
         self.scan_button = None
-        self.delete_button = None
+        self.move_button = None
 
-        self.deleted_frames = []
-        self.frames_to_delete = []
-        self.dry_run = True
+        self.moved_paths = []
+        self.paths_to_move = []
 
         try:
             import sgtk
@@ -84,7 +80,7 @@ class RenderCleanup(object):
                 raise ImportError("Could not connect to ShotGrid")
 
             self.log = log
-            self.log.info(f"Successfully initialized ShotGrid connection")
+            self.log.info("Successfully initialized ShotGrid connection")
 
             self.excluded_pipeline_steps = ["Roto", "Paint", "Prep", "Ingest", "v000"]
 
@@ -95,36 +91,30 @@ class RenderCleanup(object):
             raise
 
     def show_dialog(self):
-        """Display the cleanup dialog with proper error handling"""
+        """Display the cleanup dialog"""
         try:
             if not self.dialog:
                 self.dialog = QtWidgets.QDialog()
-                self.dialog.setWindowTitle("ShotGrid Render Cleanup")
-                self.dialog.setMinimumWidth(500)
-                self.dialog.setMinimumHeight(400)
+                self.dialog.setWindowTitle("ShotGrid Render Cleanup (Move EXR Folders)")
+                self.dialog.setMinimumWidth(640)
+                self.dialog.setMinimumHeight(520)
 
                 layout = QtWidgets.QVBoxLayout()
                 self.dialog.setLayout(layout)
 
-                # Info label
                 info_label = QtWidgets.QLabel(
-                    "This tool will identify and delete EXR render files based on the following rules:"
+                    "This tool identifies EXR render folders by rules and moves them to a destination you choose:"
                     "<ul>"
-                    "<li>All EXR renders linked to versions with status 'na'</li>"
-                    "<li>All older EXR renders linked to versions with status 'intn' on shots with multiple 'intn' versions, except the newest version</li>"
-                    "<li>All older EXR renders linked to versions with status 'note' on shots with more than 2 'note' versions, except the 2 latest versions</li>"
+                    "<li>All EXR renders with Version status 'na'</li>"
+                    "<li>Older EXR renders with status 'innote' (keep newest)</li>"
+                    "<li>Older EXR renders with status 'note' when more than 2 exist (keep 2 newest)</li>"
                     "</ul>"
-                    "This will only apply to internal artist renders (excluding 'Paint, 'Roto', 'Prep', 'Ingest', and 'v000' pipeline steps)."
+                    "Only applies to internal artist renders (excluding 'Paint', 'Roto', 'Prep', 'Ingest', and 'v000' pipeline steps)."
                 )
                 info_label.setWordWrap(True)
                 layout.addWidget(info_label)
 
-                # Dry run checkbox
-                self.dry_run_checkbox = QtWidgets.QCheckBox("Dry run (preview only, don't delete files)")
-                self.dry_run_checkbox.setChecked(True)
-                layout.addWidget(self.dry_run_checkbox)
-
-                # Progress bar
+                # Progress bar + status
                 self.progress_bar = QtWidgets.QProgressBar()
                 self.progress_bar.setRange(0, 100)
                 self.progress_bar.setValue(0)
@@ -135,19 +125,24 @@ class RenderCleanup(object):
                 self.status_label.setVisible(False)
                 layout.addWidget(self.status_label)
 
+                # Results preview area
+                preview_label = QtWidgets.QLabel("<span style='color:#56BCF9; font-weight:bold;'>Preview:</span>")
+                layout.addWidget(preview_label)
+
                 self.results_text = QtWidgets.QTextEdit()
                 self.results_text.setReadOnly(True)
                 layout.addWidget(self.results_text)
 
+                # Buttons
                 button_layout = QtWidgets.QHBoxLayout()
 
                 self.scan_button = QtWidgets.QPushButton("Scan")
                 self.scan_button.clicked.connect(self.run_scan)
                 button_layout.addWidget(self.scan_button)
 
-                self.delete_button = QtWidgets.QPushButton("Delete Files")
-                self.delete_button.clicked.connect(self.delete_files)
-                button_layout.addWidget(self.delete_button)
+                self.move_button = QtWidgets.QPushButton("Move Files")
+                self.move_button.clicked.connect(self.move_files)
+                button_layout.addWidget(self.move_button)
 
                 close_button = QtWidgets.QPushButton("Close")
                 close_button.clicked.connect(self.dialog.close)
@@ -155,9 +150,10 @@ class RenderCleanup(object):
 
                 layout.addLayout(button_layout)
 
-            self.log.info("About to show dialog")
-
-            self.dialog.exec_()
+            if hasattr(self.dialog, "exec"):
+                self.dialog.exec()
+            else:
+                self.dialog.exec_()
 
         except Exception as e:
             error_msg = f"Error creating dialog: {str(e)}\n{traceback.format_exc()}"
@@ -165,7 +161,7 @@ class RenderCleanup(object):
             nuke.message(error_msg)
 
     def run_scan(self):
-        """Run the scan to identify files to delete"""
+        """Run the scan to identify folders to move"""
         try:
             self.scan_button.setEnabled(False)
 
@@ -173,10 +169,7 @@ class RenderCleanup(object):
             self.progress_bar.setVisible(True)
             self.status_label.setText("Starting scan...")
             self.status_label.setVisible(True)
-
             QtWidgets.QApplication.processEvents()
-
-            self.dry_run = self.dry_run_checkbox.isChecked()
 
             if self.results_text:
                 self.results_text.clear()
@@ -186,72 +179,67 @@ class RenderCleanup(object):
             project = self.context.project
             if not project:
                 self.log_message("Error: No project found in context")
+                self.scan_button.setEnabled(True)
                 return
 
             self.update_progress(10, "Fetching versions...")
-
             self.log_message(f"Fetching versions for project: {project['name']}")
 
             all_versions = self.get_versions_for_cleanup(project)
             self.log_message(f"Found {len(all_versions)} versions to analyze")
 
-            self.update_progress(40, "Grouping versions by shot...")
-
+            self.update_progress(40, "Grouping versions by shot/task...")
             task_versions = self.group_versions_by_shot(all_versions)
 
             self.update_progress(60, "Applying cleanup rules...")
-
-            self.frames_to_delete = self.apply_cleanup_rules(task_versions)
+            self.paths_to_move = self.apply_cleanup_rules(task_versions)
 
             self.update_progress(90, "Finalizing results...")
 
-            # Calculate total size to be deleted (approx)
+            # Calculate total size (best-effort)
             total_size_bytes = 0
-            for frame_path in self.frames_to_delete:
-                if os.path.exists(frame_path):
-                    if os.path.isdir(frame_path):
-                        # For directories, calculate size of all contents
-                        for dirpath, dirnames, filenames in os.walk(frame_path):
+            for p in self.paths_to_move:
+                if os.path.exists(p):
+                    if os.path.isdir(p):
+                        for dirpath, _, filenames in os.walk(p):
                             for f in filenames:
                                 fp = os.path.join(dirpath, f)
                                 if os.path.exists(fp):
-                                    total_size_bytes += os.path.getsize(fp)
+                                    try:
+                                        total_size_bytes += os.path.getsize(fp)
+                                    except Exception:
+                                        pass
                     else:
-                        total_size_bytes += os.path.getsize(frame_path)
+                        try:
+                            total_size_bytes += os.path.getsize(p)
+                        except Exception:
+                            pass
 
-            # Convert bytes to more readable format
-            if total_size_bytes > 1099511627776:  # 1 TB
-                size_str = f"{total_size_bytes / 1099511627776:.2f} TB"
-            elif total_size_bytes > 1073741824:  # 1 GB
-                size_str = f"{total_size_bytes / 1073741824:.2f} GB"
-            elif total_size_bytes > 1048576:  # 1 MB
-                size_str = f"{total_size_bytes / 1048576:.2f} MB"
-            elif total_size_bytes > 1024:  # 1 KB
-                size_str = f"{total_size_bytes / 1024:.2f} KB"
+            def _fmt_bytes(b):
+                if b > 1099511627776:
+                    return f"{b / 1099511627776:.2f} TB"
+                if b > 1073741824:
+                    return f"{b / 1073741824:.2f} GB"
+                if b > 1048576:
+                    return f"{b / 1048576:.2f} MB"
+                if b > 1024:
+                    return f"{b / 1024:.2f} KB"
+                return f"{b} bytes"
+
+            if self.paths_to_move:
+                self.log_message("EXR sequence folders identified:")
+                for p in self.paths_to_move:
+                    self.log_message(f"  - {p}")
             else:
-                size_str = f"{total_size_bytes} bytes"
+                self.log_message("No EXR sequence folders found to move.")
 
-            # Display individual paths first
-            if self.frames_to_delete:
-                self.log_message("Paths that will be deleted:")
-                for frame_path in self.frames_to_delete:
-                    self.log_message(f"Will delete: {frame_path}")
-            else:
-                self.log_message("No paths found to delete.")
-
-            # display summary
             self.log_message("\n" + "="*50)
-            self.log_message(f"SCAN SUMMARY:")
-            self.log_message(f"Total deletable paths: {len(self.frames_to_delete)}")
-            self.log_message(f"Approximate total size: {size_str}")
+            self.log_message("SCAN SUMMARY:")
+            self.log_message(f"Total folders: {len(self.paths_to_move)}")
+            self.log_message(f"Approximate total size: {_fmt_bytes(total_size_bytes)}")
             self.log_message("="*50)
 
-            if self.dry_run:
-                self.log_message("\nDRY RUN COMPLETE - No files were deleted")
-                self.log_message("Uncheck 'Dry run' and click 'Delete Files' to perform actual deletion")
-
             self.update_progress(100, "Scan complete")
-
             self.scan_button.setEnabled(True)
 
         except Exception as e:
@@ -259,7 +247,6 @@ class RenderCleanup(object):
             self.log_message(error_msg)
             self.log_message(traceback.format_exc())
             nuke.message(error_msg)
-
             self.scan_button.setEnabled(True)
             self.status_label.setText("Error during scan")
             self.update_progress(100, "Error")
@@ -267,72 +254,99 @@ class RenderCleanup(object):
     def update_progress(self, value, status_text=None):
         """Update the progress bar and status text"""
         try:
-            if hasattr(self, 'progress_bar') and self.progress_bar:
+            if self.progress_bar:
                 self.progress_bar.setValue(value)
-
-            if status_text and hasattr(self, 'status_label') and self.status_label:
+            if status_text and self.status_label:
                 self.status_label.setText(status_text)
-
             QtWidgets.QApplication.processEvents()
-
         except Exception as e:
             self.log.error(f"Error updating progress: {str(e)}")
 
-    def delete_files(self):
-        """Delete the identified files"""
+    def _ensure_unique_dest(self, dest_root, base_name):
+        """
+        Return a destination path under dest_root that doesn't collide.
+        If 'dest_root/base_name' exists, returns '.../base_name_1', '.../base_name_2', etc.
+        """
+        candidate = os.path.join(dest_root, base_name)
+        if not os.path.exists(candidate):
+            return candidate
+        idx = 1
+        while True:
+            candidate_i = os.path.join(dest_root, f"{base_name}_{idx}")
+            if not os.path.exists(candidate_i):
+                return candidate_i
+            idx += 1
+
+    def move_files(self):
+        """Move the identified EXR sequence directories into a single flat destination folder."""
         try:
-            if not self.frames_to_delete:
-                self.log_message("No files to delete. Run scan first.")
+            if not self.paths_to_move:
+                self.log_message("No folders to move. Run a scan first.")
                 return
 
-            if self.dry_run:
-                self.log_message("Dry run is enabled. Uncheck 'Dry run' to delete files.")
+            # Ask for destination folder
+            self.log_message("Prompting for destination folder...")
+            dlg = QtWidgets.QFileDialog(self.dialog)
+            dlg.setFileMode(QtWidgets.QFileDialog.Directory)
+            dlg.setOption(QtWidgets.QFileDialog.ShowDirsOnly, True)
+            dlg.setWindowTitle("Choose Destination Folder (EXR sequence folders will be placed here)")
+            if hasattr(dlg, "exec"):
+                accepted = dlg.exec()
+            else:
+                accepted = dlg.exec_()
+            if not accepted:
+                self.log_message("Move cancelled: no destination selected.")
                 return
 
-            self.delete_button.setEnabled(False)
+            dest_root = dlg.selectedFiles()[0]
+            if not dest_root or not os.path.isdir(dest_root):
+                self.log_message("Invalid destination selected.")
+                nuke.message("Please select a valid destination folder.")
+                return
+
+            self.move_button.setEnabled(False)
             self.progress_bar.setValue(0)
             self.progress_bar.setVisible(True)
-            self.status_label.setText("Starting deletion...")
+            self.status_label.setText("Starting move...")
             self.status_label.setVisible(True)
 
-            self.log_message("Starting file deletion...")
-            self.deleted_frames = []
+            self.log_message(f"Moving {len(self.paths_to_move)} folders to: {dest_root}")
+            self.moved_paths = []
 
-            total_files = len(self.frames_to_delete)
-            for i, frame_path in enumerate(self.frames_to_delete):
-                progress_value = int((i / total_files) * 100)
-                self.update_progress(progress_value, f"Deleting file {i+1} of {total_files}")
+            total = len(self.paths_to_move)
+            for i, seq_dir in enumerate(self.paths_to_move, start=1):
+                progress_value = int((i - 1) / total * 100)
+                self.update_progress(progress_value, f"Moving folder {i} of {total}")
 
-                if os.path.exists(frame_path):
-                    if os.path.isdir(frame_path):
-                        self.log_message(f"Deleting directory: {frame_path}")
-                        shutil.rmtree(frame_path)
-                    else:
-                        self.log_message(f"Deleting file: {frame_path}")
-                        os.remove(frame_path)
+                if not os.path.exists(seq_dir):
+                    self.log_message(f"Path not found (skipping): {seq_dir}")
+                    continue
 
-                    self.deleted_frames.append(frame_path)
-                else:
-                    self.log_message(f"Path not found: {frame_path}")
+                base_name = os.path.basename(seq_dir.rstrip(os.sep))
+                dest_path = self._ensure_unique_dest(dest_root, base_name)
 
-            self.update_progress(100, "Deletion complete")
+                try:
+                    self.log_message(f"Moving: {seq_dir}  ->  {dest_path}")
+                    shutil.move(seq_dir, dest_path)
+                    self.moved_paths.append(dest_path)
+                except Exception as move_err:
+                    self.log_message(f"Move failed for {seq_dir}: {move_err}")
 
-            self.log_message(f"Deletion complete. Deleted {len(self.deleted_frames)} out of {len(self.frames_to_delete)} frame sequences.")
-
-            self.delete_button.setEnabled(True)
+            self.update_progress(100, "Move complete")
+            self.log_message(f"Move complete. Moved {len(self.moved_paths)} of {len(self.paths_to_move)} folders.")
+            self.move_button.setEnabled(True)
 
         except Exception as e:
-            error_msg = f"Error during deletion: {str(e)}"
+            error_msg = f"Error during move: {str(e)}"
             self.log_message(error_msg)
             self.log_message(traceback.format_exc())
             nuke.message(error_msg)
-
-            self.delete_button.setEnabled(True)
-            self.status_label.setText("Error during deletion")
+            self.move_button.setEnabled(True)
+            self.status_label.setText("Error during move")
             self.update_progress(100, "Error")
 
     def get_versions_for_cleanup(self, project):
-        """Get all versions that aren't in excluded pipeline steps"""
+        """Get all versions that aren't in excluded pipeline steps and have EXR frames"""
         try:
             filters = [
                 ['project', 'is', project],
@@ -364,31 +378,28 @@ class RenderCleanup(object):
                     non_exr_count += 1
                     continue
 
-                step_info = "No step info"
-                if v.get('sg_task.Task.step'):
+                if v.get('sg_task') and v.get('sg_task.Task.step'):
                     step = v['sg_task.Task.step']
                     step_name = step.get('name', 'Unknown')
-                    step_info = f"Step: {step_name}"
-
                     if step_name in self.excluded_pipeline_steps:
                         self.log_message(f"Excluding version {version_code} due to pipeline step: {step_name}")
                         excluded_count += 1
                         continue
 
-                path_contains_excluded = False
+                # Extra safeguard: skip if path text contains excluded keywords
+                skip_by_path = False
                 for excluded_step in self.excluded_pipeline_steps:
                     if excluded_step.upper() in path.upper():
-                        self.log_message(f"WARNING: Path contains excluded step '{excluded_step}' but wasn't caught by step filter: {path}")
-                        path_contains_excluded = True
+                        self.log_message(f"WARNING: Path suggests excluded step '{excluded_step}': {path}")
+                        skip_by_path = True
                         break
-
-                if not path_contains_excluded:
-                    filtered_versions.append(v)
-                else:
+                if skip_by_path:
                     excluded_count += 1
+                    continue
 
-            self.log_message(f"Filter stats: {len(filtered_versions)} kept, {excluded_count} excluded by step, {non_exr_count} non-EXR")
+                filtered_versions.append(v)
 
+            self.log_message(f"Filter stats: {len(filtered_versions)} kept, {excluded_count} excluded by step/path, {non_exr_count} non-EXR")
             return filtered_versions
 
         except Exception as e:
@@ -399,16 +410,14 @@ class RenderCleanup(object):
     def group_versions_by_shot(self, versions):
         """Group versions by their shot entity AND task"""
         task_versions = defaultdict(list)
-
         for version in versions:
             if version.get('entity') and version.get('sg_task'):
                 key = f"{version['entity']['id']}_{version['sg_task']['id']}"
                 task_versions[key].append(version)
-
         return task_versions
 
     def get_sequence_directory(self, frame_path):
-        # Simply return the directory containing the frame sequence
+        """Return the directory containing the frame sequence"""
         try:
             return os.path.dirname(frame_path)
         except Exception as e:
@@ -416,7 +425,11 @@ class RenderCleanup(object):
             return frame_path
 
     def apply_cleanup_rules(self, task_versions):
-        frames_to_delete = []
+        """
+        Return a list of EXR sequence directories to move,
+        applying the three rules on a per-(shot,task) basis.
+        """
+        paths_to_move = []
         missing_paths = 0
 
         try:
@@ -427,90 +440,85 @@ class RenderCleanup(object):
                 task_name = versions[0]['sg_task']['name'] if versions and versions[0].get('sg_task') else f"ID: {task_id}"
                 self.log_message(f"\nProcessing Shot: {shot_name}, Task: {task_name}")
 
-                # Rule 1: All EXR renders linked to versions with status "na"
-                na_versions = [v for v in versions if v['sg_status_list'] == 'na']
-                for v in na_versions:
-                    if v.get('sg_path_to_frames'):
-                        # Get the directory containing the frame sequence
-                        seq_dir = self.get_sequence_directory(v['sg_path_to_frames'])
+                # Ensure chronological order by created_at (already asc in query, but safeguard)
+                versions_sorted = sorted(versions, key=lambda v: v.get('created_at'))
 
-                        # Only add to delete list if the path exists
+                # Rule 1: All EXR renders linked to versions with status "na"
+                na_versions = [v for v in versions_sorted if v.get('sg_status_list') == 'na']
+                for v in na_versions:
+                    p = v.get('sg_path_to_frames')
+                    if p:
+                        seq_dir = self.get_sequence_directory(p)
                         if os.path.exists(seq_dir):
-                            frames_to_delete.append(seq_dir)
-                            self.log_message(f"Rule 1 (na status): {v['code']} - {seq_dir}")
+                            paths_to_move.append(seq_dir)
+                            self.log_message(f"Rule 1 (na): {v.get('code')}  ->  {seq_dir}")
                         else:
                             missing_paths += 1
 
-                # Rule 2: Delete all older EXR renders linked to versions with status "intn" on shots with more than 1 "intn" version,
-                # except the newest "intn" version
-                intn_versions = [v for v in versions if v['sg_status_list'] == 'intn']
-                if len(intn_versions) > 1:
-                    # Keep only the newest intn version (last in the list since sorted by created_at)
-                    versions_to_delete = intn_versions[:-1]  # All except the last one
-                    for v in versions_to_delete:
-                        if v.get('sg_path_to_frames'):
-                            # Get the directory containing the frame sequence
-                            seq_dir = self.get_sequence_directory(v['sg_path_to_frames'])
-
-                            # Only add to delete list if the path exists
+                # Rule 2: For status "innote" on shots with >1, keep newest; move older
+                innote_versions = [v for v in versions_sorted if v.get('sg_status_list') == 'innote']
+                if len(innote_versions) > 1:
+                    older = innote_versions[:-1]  # keep the newest
+                    for v in older:
+                        p = v.get('sg_path_to_frames')
+                        if p:
+                            seq_dir = self.get_sequence_directory(p)
                             if os.path.exists(seq_dir):
-                                frames_to_delete.append(seq_dir)
-                                self.log_message(f"Rule 2 (older intn): {v['code']} - {seq_dir}")
+                                paths_to_move.append(seq_dir)
+                                self.log_message(f"Rule 2 (older innote): {v.get('code')}  ->  {seq_dir}")
                             else:
                                 missing_paths += 1
 
-                # Rule 3: Delete all older EXR renders linked to versions with status "note" on shots with more than 2 "note" versions,
-                # except the 2 latest "note" versions
-                note_versions = [v for v in versions if v['sg_status_list'] == 'note']
+                # Rule 3: For status "note" when >2 exist, keep 2 newest; move older
+                note_versions = [v for v in versions_sorted if v.get('sg_status_list') == 'note']
                 if len(note_versions) > 2:
-                    # Keep only the 2 newest note versions (last 2 in the list since sorted by created_at)
-                    versions_to_delete = note_versions[:-2]
-                    for v in versions_to_delete:
-                        if v.get('sg_path_to_frames'):
-                            seq_dir = self.get_sequence_directory(v['sg_path_to_frames'])
-
+                    older = note_versions[:-2]  # keep 2 newest
+                    for v in older:
+                        p = v.get('sg_path_to_frames')
+                        if p:
+                            seq_dir = self.get_sequence_directory(p)
                             if os.path.exists(seq_dir):
-                                frames_to_delete.append(seq_dir)
-                                self.log_message(f"Rule 3 (older note): {v['code']} - {seq_dir}")
+                                paths_to_move.append(seq_dir)
+                                self.log_message(f"Rule 3 (older note): {v.get('code')}  ->  {seq_dir}")
                             else:
                                 missing_paths += 1
 
             if missing_paths > 0:
                 self.log_message(f"\nSkipped {missing_paths} paths that no longer exist on the file system")
 
-            return frames_to_delete
+            # De-duplicate while preserving order
+            seen = set()
+            deduped = []
+            for p in paths_to_move:
+                if p not in seen:
+                    seen.add(p)
+                    deduped.append(p)
+
+            return deduped
 
         except Exception as e:
             self.log_message(f"Error applying cleanup rules: {str(e)}")
             self.log_message(traceback.format_exc())
-            return frames_to_delete
+            return paths_to_move
 
     def log_message(self, message):
         """Log a message to both the logger and the UI"""
         try:
-            # Log to system logger
             self.log.info(message)
-
-            # Log to UI if available
-            if hasattr(self, 'results_text') and self.results_text:
+            if self.results_text:
                 self.results_text.append(message)
-
                 cursor = self.results_text.textCursor()
-                cursor.movePosition(QtCore.QTextCursor.End)
+                cursor.movePosition(QTextCursor.End)
                 self.results_text.setTextCursor(cursor)
-
-                # Process UI events to update the text display
                 QtWidgets.QApplication.processEvents()
-
         except Exception as e:
-            # Fall back to plain logging if UI fails
             self.log.error(f"Error in log_message: {str(e)}")
             self.log.info(message)
 
 def run_in_nuke():
     """Run the cleanup tool from Nuke with robust error handling"""
     try:
-        log.info("Starting ShotGrid Render Cleanup tool")
+        log.info("Starting ShotGrid Render Cleanup (Move EXR Folders)")
 
         cleanup = RenderCleanup()
 
@@ -523,7 +531,6 @@ def run_in_nuke():
             nuke.message(error_msg)
             return
 
-        # Show the dialog using exec_() to keep it open
         cleanup.show_dialog()
 
     except Exception as e:
